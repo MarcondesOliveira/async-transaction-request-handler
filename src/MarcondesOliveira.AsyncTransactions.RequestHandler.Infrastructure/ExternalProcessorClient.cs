@@ -16,7 +16,6 @@ public sealed class ExternalProcessorClient(
         {
             Content = JsonContent.Create(new ExternalProcessorRequest(
                 transaction.TransactionId,
-                transaction.CorrelationId,
                 transaction.TransactionType,
                 transaction.Amount,
                 transaction.Destination,
@@ -80,7 +79,6 @@ public sealed class ExternalProcessorClient(
 
     private sealed record ExternalProcessorRequest(
         Guid TransactionId,
-        Guid CorrelationId,
         string TransactionType,
         Money Amount,
         Destination Destination,

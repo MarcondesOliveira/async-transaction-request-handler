@@ -57,6 +57,7 @@ public sealed class ExternalProcessorClientTests
         Assert.Equal(
             "https://callback.example/v1/callbacks/transactions",
             json.RootElement.GetProperty("callbackUrl").GetString());
+        Assert.False(json.RootElement.TryGetProperty("correlationId", out _));
     }
 
     [Theory]
