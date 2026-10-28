@@ -37,7 +37,7 @@ prevents a late request-handler update from overwriting a final callback result.
 The Lambda handler is:
 
 ```text
-MarcondesOliveira.AsyncTransactions.RequestHandler.Host::MarcondesOliveira.AsyncTransactions.RequestHandler.Host.RequestHandlerFunction::FunctionHandler
+AsyncTransaction.Handler::MarcondesOliveira.AsyncTransactions.RequestHandler.Host.RequestHandlerFunction::FunctionHandler
 ```
 
 ## Local validation
