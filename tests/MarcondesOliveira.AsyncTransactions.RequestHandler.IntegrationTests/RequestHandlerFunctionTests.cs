@@ -27,11 +27,73 @@ public sealed class RequestHandlerFunctionTests
             ]
         };
 
-        var result = await sut.FunctionHandler(sqsEvent, new TestLambdaContext());
+        var logger = new TestLambdaLogger();
+        var result = await sut.FunctionHandler(sqsEvent, new TestLambdaContext { Logger = logger });
 
         var failure = Assert.Single(result.BatchItemFailures);
         Assert.Equal("message-retry", failure.ItemIdentifier);
         Assert.Equal(2, processor.ProcessedTransactionIds.Count);
+        var logs = logger.Buffer.ToString();
+        Assert.Contains("RequestHandled", logs);
+        Assert.Contains("SubmissionAccepted", logs);
+        Assert.Contains(successful.TransactionId.ToString(), logs);
+        Assert.Contains(successful.CorrelationId.ToString(), logs);
+        Assert.Contains("RequestProcessingFailed", logs);
+        Assert.Contains(retryable.EventId.ToString(), logs);
+        Assert.Contains(retryable.TransactionId.ToString(), logs);
+        Assert.Contains(retryable.CorrelationId.ToString(), logs);
+        Assert.Contains(nameof(ExternalProcessorTransientException), logs);
+        Assert.DoesNotContain("Temporary failure", logs);
+        Assert.DoesNotContain("portfolio-account-001", logs);
+        Assert.DoesNotContain("250.75", logs);
+        Assert.DoesNotContain("order-0001", logs);
+    }
+
+    [Fact]
+    public async Task MalformedMessageIsLoggedWithoutLeakingBodyAndDoesNotStopTheBatch()
+    {
+        var processor = new SelectiveProcessor(Guid.Empty);
+        var sut = new RequestHandlerFunction(processor);
+        var logger = new TestLambdaLogger();
+        var result = await sut.FunctionHandler(new SQSEvent
+        {
+            Records =
+            [
+                new() { MessageId = "malformed", Body = "private-invalid-payload" },
+                Message("valid", Transaction())
+            ]
+        }, new TestLambdaContext { Logger = logger });
+
+        Assert.Equal("malformed", Assert.Single(result.BatchItemFailures).ItemIdentifier);
+        Assert.Single(processor.ProcessedTransactionIds);
+        var logs = logger.Buffer.ToString();
+        Assert.Contains("RequestProcessingFailed", logs);
+        Assert.Contains(nameof(JsonException), logs);
+        Assert.Contains("malformed", logs);
+        Assert.Contains("RequestHandled", logs);
+        Assert.DoesNotContain("private-invalid-payload", logs);
+    }
+
+    [Fact]
+    public async Task PermanentRejectionIsLoggedAsHandledAndIsNotRetried()
+    {
+        var logger = new TestLambdaLogger();
+        var sut = new RequestHandlerFunction(new RejectedProcessor());
+        var result = await sut.FunctionHandler(new SQSEvent
+        {
+            Records = [Message("rejected", Transaction())]
+        }, new TestLambdaContext { Logger = logger });
+
+        Assert.Empty(result.BatchItemFailures);
+        Assert.Contains("SubmissionRejected", logger.Buffer.ToString());
+        Assert.DoesNotContain("RequestProcessingFailed", logger.Buffer.ToString());
+    }
+
+    private sealed class RejectedProcessor : ITransactionRequestProcessor
+    {
+        public Task<RequestHandlingOutcome> HandleAsync(
+            TransactionRequested transaction,
+            CancellationToken cancellationToken) => Task.FromResult(RequestHandlingOutcome.Failed);
     }
 
     private static SQSEvent.SQSMessage Message(

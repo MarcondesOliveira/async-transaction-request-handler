@@ -40,6 +40,29 @@ The Lambda handler is:
 AsyncTransaction.Handler::MarcondesOliveira.AsyncTransactions.RequestHandler.Host.RequestHandlerFunction::FunctionHandler
 ```
 
+## Operational logs
+
+The handler emits `RequestHandled` after a submission is accepted or permanently
+rejected, and `RequestProcessingFailed` when a message must be retried. Logs contain
+the SQS message ID and, when deserialization succeeds, event, transaction and
+correlation IDs. Malformed bodies remain traceable through the SQS message ID.
+
+`SubmissionAccepted` describes the processor response, not a guarantee that the
+transaction is still `PROCESSING`: a callback may already have finalized it.
+Permanent rejections are handled outcomes, not SQS batch failures.
+
+Payloads, amounts, account IDs, external references and exception messages are not
+logged. Failures include exception and root-cause types plus the stack trace;
+exception messages can contain external response bodies or invalid input.
+Named log parameters use the native `ILambdaLogger` API. Structured JSON output
+requires the Lambda logging format to be configured in the infrastructure repository;
+this code change alone does not enable it in AWS.
+
+After deployment, manually create a transaction with Bruno or Swagger and search
+the request-handler CloudWatch log group for its `transactionId`. Check for
+`RequestHandled` and the same `correlationId`. A controlled timeout should produce
+`RequestProcessingFailed` for each attempt, without exposing the request body.
+
 ## Local validation
 
 ```bash

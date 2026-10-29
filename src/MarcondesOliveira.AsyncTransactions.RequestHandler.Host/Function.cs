@@ -37,20 +37,37 @@ public sealed class RequestHandlerFunction
 
         foreach (var record in sqsEvent.Records)
         {
+            TransactionRequested? transaction = null;
             try
             {
-                var transaction = JsonSerializer.Deserialize<TransactionRequested>(
+                transaction = JsonSerializer.Deserialize<TransactionRequested>(
                     record.Body,
                     JsonOptions) ?? throw new JsonException("SQS message body is empty.");
 
-                await processor.HandleAsync(transaction, CancellationToken.None);
+                var outcome = await processor.HandleAsync(transaction, CancellationToken.None);
+                context.Logger.LogInformation(
+                    "{EventName} messageId={MessageId} eventId={EventId} transactionId={TransactionId} correlationId={CorrelationId} outcome={Outcome}",
+                    "RequestHandled",
+                    record.MessageId,
+                    transaction.EventId,
+                    transaction.TransactionId,
+                    transaction.CorrelationId,
+                    outcome == RequestHandlingOutcome.Processing
+                        ? "SubmissionAccepted"
+                        : "SubmissionRejected");
             }
             catch (Exception exception)
             {
                 context.Logger.LogError(
-                    "Failed to process SQS message {MessageId}: {Exception}",
+                    "{EventName} messageId={MessageId} eventId={EventId} transactionId={TransactionId} correlationId={CorrelationId} errorType={ErrorType} causeType={CauseType} stackTrace={StackTrace}",
+                    "RequestProcessingFailed",
                     record.MessageId,
-                    exception);
+                    transaction?.EventId,
+                    transaction?.TransactionId,
+                    transaction?.CorrelationId,
+                    exception.GetType().Name,
+                    exception.GetBaseException().GetType().Name,
+                    exception.StackTrace);
                 failures.Add(new SQSBatchResponse.BatchItemFailure
                 {
                     ItemIdentifier = record.MessageId
