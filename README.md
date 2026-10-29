@@ -73,10 +73,36 @@ fail the job; the JSON report is printed in the job log for investigation.
 
 The workflow follows the Transaction API's validated CI pattern: actions pinned
 to commit SHAs, read-only repository permissions and no persisted checkout token.
-It requests no AWS credentials or OIDC token, publishes no deployment package and
-does not modify AWS. Tests use controlled substitutes, so a manual Bruno/Swagger
+The validation job requests no AWS credentials or OIDC token, publishes no
+deployment package and does not modify AWS. Tests use controlled substitutes, so a manual Bruno/Swagger
 test is not needed for this CI-only change. Branch protection is separate from
 the workflow and is not enabled by adding this file.
+
+### Versioned Lambda artifact
+
+After validation succeeds on `main` (push or manual dispatch), a separate job
+publishes the Host in Release for `linux-arm64`, framework-dependent, without
+ReadyToRun or an apphost. The script explicitly disables the project's default
+ReadyToRun setting for this portable build. Pull requests do not generate
+deployment artifacts. GitHub Actions retains the bundle for seven days:
+
+- `async-transaction-request-handler.zip`: Lambda package with assemblies at its root;
+- `async-transaction-request-handler.zip.sha256`: SHA-256 verification file;
+- `build-manifest.json`: full source commit, SDK, runtime/architecture, hexadecimal
+  and Base64 ZIP hashes, and future S3 key `<service>/<commit>/<service>.zip`.
+
+The artifact name includes commit, run ID and attempt without overwriting earlier
+bundles. Identity is traceable; byte-for-byte reproducibility across builds is not
+claimed. The Base64 `sourceCodeHash` refers to the inner Lambda ZIP, not GitHub's
+outer download archive/digest. Extract the downloaded Actions bundle and run
+`sha256sum --check async-transaction-request-handler.zip.sha256` inside it.
+
+`.github/scripts/package.sh` validates the checkout SHA, refuses an existing output
+directory and checks `AsyncTransaction.Handler.dll`, `.deps.json` and
+`.runtimeconfig.json` before zipping. The existing Lambda handler remains unchanged.
+The package job requests no AWS credentials/OIDC and performs no S3 upload or
+deployment; it does not change the running handler. No new Bruno/Swagger test is
+required until an actual reviewed deployment.
 
 ## Local validation
 
