@@ -63,6 +63,21 @@ the request-handler CloudWatch log group for its `transactionId`. Check for
 `RequestHandled` and the same `correlationId`. A controlled timeout should produce
 `RequestProcessingFailed` for each attempt, without exposing the request body.
 
+## Continuous integration
+
+The `CI` workflow runs on pull requests targeting `main`, pushes to `main`, and
+manual dispatch. It restores dependencies, verifies formatting, builds Release
+with the configured .NET analyzers/warnings as errors, runs unit/integration/contract
+tests and audits direct/transitive NuGet dependencies. Reported vulnerabilities
+fail the job; the JSON report is printed in the job log for investigation.
+
+The workflow follows the Transaction API's validated CI pattern: actions pinned
+to commit SHAs, read-only repository permissions and no persisted checkout token.
+It requests no AWS credentials or OIDC token, publishes no deployment package and
+does not modify AWS. Tests use controlled substitutes, so a manual Bruno/Swagger
+test is not needed for this CI-only change. Branch protection is separate from
+the workflow and is not enabled by adding this file.
+
 ## Local validation
 
 ```bash
