@@ -102,13 +102,32 @@ directory and checks `AsyncTransaction.Handler.dll`, `.deps.json` and
 `.runtimeconfig.json` before zipping. The existing Lambda handler remains unchanged.
 The package job requests no AWS credentials/OIDC and performs no S3 upload or
 deployment; it does not change the running handler. No new Bruno/Swagger test is
-required until an actual reviewed deployment.
+required until an actual deployment. The downstream delivery workflow now handles
+publication and central Terraform deployment after a successful main push.
 
-### Manual S3 publication through OIDC
+### Automated delivery through OIDC
 
-`Publish Request Handler artifact` (`.github/workflows/publish.yml`) is dispatch-only and
-restricted to `main`. It publishes an existing successful main CI run's bundle;
-it does not rebuild source, run Terraform or change the Lambda.
+`Deliver Request Handler` (`.github/workflows/publish.yml`) runs after successful
+`CI` from a push to this repository's `main`. PRs, forks, failed/cancelled CI and
+manual CI runs do not automatically deploy. It publishes the exact approved CI
+bundle without rebuilding, then dispatches the central infrastructure workflow
+with `service=async-transaction-request-handler` and the full source commit.
+The central guard permits only the Request Handler package update and preserves
+the other services' deployed versions. It verifies the Lambda hash/status and
+tests the complete synthetic transaction flow.
+
+The fine-grained `INFRA_WORKFLOW_TOKEN` secret is supplied only to dispatch/wait,
+not stored in code or workflow inputs. It grants Actions access to infrastructure,
+not AWS access. Delivery waits for the exact returned run ID; S3 publication or
+dispatch alone is not success. Missing/expired tokens and failed/cancelled central
+runs fail visibly. At most two minutes of initial missing metadata/title evaluation
+are tolerated; wrong IDs or concrete identities fail immediately. Every completed
+run must pass all identity checks. Diagnostics exclude tokens/full API payloads.
+
+Delivery jobs queue without replacing other pending jobs. Central Terraform jobs
+serialize per stack. Waiting is bounded to 40 minutes; timeout does not cancel
+or redispatch a possibly active central run. Inspect its linked result before
+retrying; no automatic rollback or overwrite is performed.
 
 Repository variables hold deployment metadata outside source code:
 `AWS_REGION`, `AWS_ACCOUNT_ID`, `ARTIFACT_BUCKET` and `AWS_ARTIFACT_ROLE_ARN`.
@@ -117,7 +136,8 @@ verified immutable OIDC subject, audience STS and `main` branch. No environment
 name is configured on this job because that would change its subject format.
 
 1. Wait for the chosen `CI` run on `main` to succeed, including packaging.
-2. Open **Actions → Publish Request Handler artifact → Run workflow**, select `main`, supply
+2. Normally a main push starts delivery automatically. For explicit manual delivery,
+   open **Actions → Deliver Request Handler → Run workflow**, select `main`, supply
    the numeric `ci_run_id` and type `PUBLISH` in `confirmation`.
 3. The job checks the run's workflow path, repository, event, branch and conclusion,
    downloads its exact commit/run/attempt artifact, and verifies the fixed package
@@ -140,9 +160,17 @@ with the owner before any retry or cleanup; there is no automatic delete/rollbac
 An expired GitHub artifact cannot be published with this workflow. Do not rebuild
 the same commit and overwrite its existing S3 package to work around either case.
 
-After a successful upload, inspect the workflow and S3 evidence together. A manual
-Bruno/Swagger transaction adds no publication coverage because the running Lambda
-has not changed; end-to-end testing belongs to the later reviewed deploy.
+After publication the workflow waits for central deploy, Lambda verification and
+smoke success, reporting that run's URL in logs/summary. After successful delivery,
+you can test manually through the main Transaction API's Swagger or Bruno:
+POST `/transactions` with synthetic data and a new `Idempotency-Key`, then GET
+`/transactions/{transactionId}` until `SUCCEEDED/APPROVED`. The Request Handler
+itself consumes SQS; it has no HTTP/Swagger endpoint. No manual test is required
+before push because this change only adds automation; the first automatic real
+delivery still needs verification after the owner pushes.
+
+Run orchestration tests locally without GitHub/AWS requests:
+`python3 -m unittest discover -s tests/delivery -v`. CI also runs them.
 
 References: [AWS OIDC action](https://github.com/aws-actions/configure-aws-credentials),
 [S3 conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html).
@@ -157,4 +185,4 @@ dotnet test --no-build
 
 No AWS resource is created by building or testing this repository. SQS, EventBridge
 Pipes, IAM and deployment configuration belong to the infrastructure repository and
-are introduced in the next project stage.
+are managed by that repository; routine deployment now invokes its pipeline.
