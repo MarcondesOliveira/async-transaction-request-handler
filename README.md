@@ -1,5 +1,12 @@
 # Async Transaction Request Handler
 
+[Complete project overview](https://github.com/MarcondesOliveira/async-transaction-infrastructure)
+· [From-zero reproduction guide](https://github.com/MarcondesOliveira/async-transaction-infrastructure/blob/main/docs/reproduce.md)
+
+This README covers the SQS request consumer, not an HTTP API. The central guide
+explains the five repositories, first owner provisioning, GitHub/OIDC setup and
+teardown. Routine delivery requires an existing stack and deployed packages.
+
 AWS Lambda that consumes transaction requests from SQS and submits them to the
 simulated external processor in the Async Transaction Processing portfolio project.
 
@@ -56,7 +63,8 @@ logged. Failures include exception and root-cause types plus the stack trace;
 exception messages can contain external response bodies or invalid input.
 Named log parameters use the native `ILambdaLogger` API. Structured JSON output
 requires the Lambda logging format to be configured in the infrastructure repository;
-this code change alone does not enable it in AWS.
+application code alone does not enable it in AWS. The deployed lab configures
+native JSON logging for this handler through Terraform.
 
 After deployment, manually create a transaction with Bruno or Swagger and search
 the request-handler CloudWatch log group for its `transactionId`. Check for
@@ -74,8 +82,8 @@ fail the job; the JSON report is printed in the job log for investigation.
 The workflow follows the Transaction API's validated CI pattern: actions pinned
 to commit SHAs, read-only repository permissions and no persisted checkout token.
 The validation job requests no AWS credentials or OIDC token, publishes no
-deployment package and does not modify AWS. Tests use controlled substitutes, so a manual Bruno/Swagger
-test is not needed for this CI-only change. Branch protection is separate from
+deployment package and does not modify AWS. Tests use controlled substitutes, so
+live Bruno/Swagger calls are not needed to run CI. Branch protection is separate from
 the workflow and is not enabled by adding this file.
 
 ### Versioned Lambda artifact
@@ -108,8 +116,9 @@ publication and central Terraform deployment after a successful main push.
 ### Automated delivery through OIDC
 
 `Deliver Request Handler` (`.github/workflows/publish.yml`) runs after successful
-`CI` from a push to this repository's `main`. PRs, forks, failed/cancelled CI and
-manual CI runs do not automatically deploy. It publishes the exact approved CI
+`CI` from a push to this repository's `main`. PR runs, failed/cancelled CI, runs
+from another head repository and manual CI do not automatically deploy.
+It publishes the exact approved CI
 bundle without rebuilding, then dispatches the central infrastructure workflow
 with `service=async-transaction-request-handler` and the full source commit.
 The central guard permits only the Request Handler package update and preserves
@@ -165,9 +174,9 @@ smoke success, reporting that run's URL in logs/summary. After successful delive
 you can test manually through the main Transaction API's Swagger or Bruno:
 POST `/transactions` with synthetic data and a new `Idempotency-Key`, then GET
 `/transactions/{transactionId}` until `SUCCEEDED/APPROVED`. The Request Handler
-itself consumes SQS; it has no HTTP/Swagger endpoint. No manual test is required
-before push because this change only adds automation; the first automatic real
-delivery still needs verification after the owner pushes.
+itself consumes SQS; it has no HTTP/Swagger endpoint. This automatic main-push
+delivery has been validated on AWS through the final result and success reported
+back to this repository, with manual GET verification by the owner.
 
 Run orchestration tests locally without GitHub/AWS requests:
 `python3 -m unittest discover -s tests/delivery -v`. CI also runs them.
@@ -181,8 +190,23 @@ References: [AWS OIDC action](https://github.com/aws-actions/configure-aws-crede
 dotnet restore
 dotnet build --no-restore
 dotnet test --no-build
+python3 -m unittest discover -s tests/delivery -v
 ```
 
 No AWS resource is created by building or testing this repository. SQS, EventBridge
 Pipes, IAM and deployment configuration belong to the infrastructure repository and
 are managed by that repository; routine deployment now invokes its pipeline.
+
+## Runtime validation and limits
+
+The managed .NET 10/ARM64 Lambda, request queue, Pipe, simulator call and final
+callback flow have been validated in the lab. Create transactions through the
+main API to exercise the handler; do not POST directly to this Lambda. Use a
+new idempotency key for each independent test and correlate the resulting ID
+through handler logs. A successful processor response can race with callback
+completion; conditional writes must preserve a terminal result.
+
+Transient failures are retried through SQS and may exhaust into the DLQ without
+finalizing the transaction. There is no automatic DLQ recovery or operator alert
+platform. Inspect the [recovery guide](https://github.com/MarcondesOliveira/async-transaction-infrastructure/blob/main/docs/lab-operations.md)
+and [overall limits](https://github.com/MarcondesOliveira/async-transaction-infrastructure#limits-costs-and-teardown).
